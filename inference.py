@@ -13,6 +13,16 @@ def run_D1_streamer(prompt):
     total_tokens_requested = 0
     iteration = 0
 
+    # Structured result handed back to the caller (agent) on every exit path,
+    # so a tool can inspect the final state instead of relying on prints.
+    result = {
+        "status": "running",
+        "action": None,
+        "signals": {},
+        "iteration_count": 0,
+        "text": "",
+    }
+
     while total_tokens_requested < MAX_TOTAL_TOKENS:
         budget = min(
             ANALYZE_EVERY,
@@ -54,7 +64,8 @@ def run_D1_streamer(prompt):
                 "been spent on reasoning - disable thinking or raise "
                 "ANALYZE_EVERY.)"
             )
-            break
+            result["status"] = "empty"
+            return result
 
         iteration += 1
         total_tokens_requested += budget
@@ -76,9 +87,13 @@ def run_D1_streamer(prompt):
         except (requests.RequestException, ValueError, TypeError) as exc:
             print(f"[D1 error] {exc}")
             print("[Middleman] Failing closed: stopping generation.")
-            break
+            result["status"] = "error"
+            return result
 
         print(f"[Signals] {state}")
+        result["signals"] = state
+        result["iteration_count"] = iteration
+        result["text"] = window
 
         # Deterministic control: D1 signals -> compiled TAC -> action.
         try:
@@ -86,23 +101,33 @@ def run_D1_streamer(prompt):
         except (ValueError, TypeError, ZeroDivisionError) as exc:
             print(f"[TAC error] {exc}")
             print("[Middleman] Stopping because policy evaluation failed.")
-            break
+            result["status"] = "error"
+            return result
 
         print(f"[TAC decision] {action}")
+        result["action"] = action
 
         if action == "HALT":
             print("[Middleman] Generation terminated by D1 policy.")
-            break
+            result["status"] = "halt"
+            return result
 
         if action == "CHANGE_STRATEGY":
-            print("[Middleman] Strategy change requested.")
-            print("[Middleman] Stopping; replanning is not implemented.")
-            break
+            # Hand control back to the agent: report that the model could not
+            # complete the task as-is, and let it make a fresh call instead of
+            # stopping silently.
+            print(
+                "[Middleman] Strategy change requested by D1 policy. "
+                "Returning control to the agent for a fresh call."
+            )
+            result["status"] = "change_strategy"
+            return result
 
         # A natural end from the 9B model also ends the run.
         if finish_reason == "stop":
             print("[Middleman] 9B model finished naturally.")
-            break
+            result["status"] = "complete"
+            return result
 
         previous_window = window
 
@@ -115,3 +140,5 @@ def run_D1_streamer(prompt):
         })
 
     print("\n[Middleman] Session ended.")
+    result["status"] = "complete"
+    return result
