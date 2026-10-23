@@ -4,7 +4,7 @@
 generator with a small, human-readable policy engine. It works in three
 layers:
 
-1. **Generate** — stream a 9B model (`qwen/qwen3.5-0.8b`) in bounded chunks.
+1. **Generate** — stream a model (`qwen3.5-0.8b` by default) in bounded chunks.
 2. **Judge** — after each chunk, ask a lightweight "System One" judge model
    (`d1-3b`) to score the segment for *looping*, *progress*, and *task
    completion*.
@@ -97,7 +97,7 @@ Optional environment variables:
 | `ANALYZE_EVERY` | 200 | Tokens generated per analysis checkpoint. |
 | `MAX_TOTAL_TOKENS` | 4096 | Hard cap on total tokens requested. |
 | `D1_TIMEOUT` | 30 | Timeout (seconds) for a judge request. |
-| `NINE_B_MODEL` | `qwen/qwen3.5-0.8b` | Model used for generation. |
+| `NINE_B_MODEL` | `qwen3.5-0.8b` | Model used for generation. |
 | `D1_MODEL` | `d1-3b` | Judge model. |
 | `D1_ENDPOINT` | `http://127.0.0.1:1234/v1/systemone` | Judge endpoint. |
 
@@ -133,6 +133,19 @@ cat mcp.json                      # { "mcpServers": { "strmer": { command, args 
 | `get_history(limit=10)` | Return recent **structured execution history** (#4): the JSON event log (start/iteration/finish) written by each generation session, with judge signals on iteration events. No network/models needed — safe to call standalone. | No |
 
 Typical agent flow: `validate_policy(...)` → if valid, `run_generation(prompt, expressions=...)`; then `get_history()` to review what happened.
+
+### MCP proof-of-concept client
+
+With both models available through the configured endpoints, run:
+
+```bash
+.venv/Scripts/python.exe poc_test_client.py
+```
+
+The client calls all three MCP tools and runs generation cases for `HALT`,
+`CHANGE_STRATEGY`, and natural completion. It appends call arguments, results,
+timings, pass checks, and a history snapshot to `poc_runs.json`. The file is
+written after each call so partial runs are retained if a later call fails.
 
 
 ### Semantic validation (follow-up)
