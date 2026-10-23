@@ -5,10 +5,21 @@ import requests
 from .config import ANALYZE_EVERY, MAX_TOTAL_TOKENS, NINE_B_MODEL, client
 from .session import SessionRecorder
 from .D1_monitor import analyze_with_D1
-from .policy_set import VM
+from .policy_set import TAC
+from .tac_vm import TACInterpreter
 
 
-def run_D1_streamer(prompt):
+def run_D1_streamer(prompt, tac=None, output_stream=None):
+    import sys
+
+    output_stream = output_stream or sys.stdout
+
+    def log(*args, **kwargs):
+        print(*args, file=output_stream, **kwargs)
+
+    # Each MCP invocation may compile its own policy set. Keep the module's
+    # default TAC for existing callers, while allowing callers to supply theirs.
+    vm = TACInterpreter(TAC if tac is None else tac)
     messages = [{"role": "user", "content": prompt}]
     previous_window = ""
     total_tokens_requested = 0
@@ -45,7 +56,7 @@ def run_D1_streamer(prompt):
             window_parts = []
             finish_reason = None
 
-            print("\n[9B] ", end="", flush=True)
+            log("\n[9B] ", end="", flush=True)
 
             for chunk in stream:
                 if not chunk.choices:  # e.g. trailing usage-only chunk
@@ -55,7 +66,7 @@ def run_D1_streamer(prompt):
                 delta = choice.delta.content or ""
 
                 if delta:
-                    print(delta, end="", flush=True)
+                    log(delta, end="", flush=True)
                     window_parts.append(delta)
 
                 if choice.finish_reason:
@@ -64,7 +75,7 @@ def run_D1_streamer(prompt):
             window = "".join(window_parts)
 
             if not window:
-                print(
+                log(
                     "\n[Middleman] No text received; stopping. "
                     "(If this is a thinking model, the token budget may have "
                     "been spent on reasoning - disable thinking or raise "
@@ -82,7 +93,7 @@ def run_D1_streamer(prompt):
                 "content": window,
             })
 
-            print(f"\n\n[Middleman] Analysis checkpoint #{iteration}")
+            log(f"\n\n[Middleman] Analysis checkpoint #{iteration}")
 
             try:
                 # Thread the original task/prompt to the judge so progress and
@@ -94,12 +105,12 @@ def run_D1_streamer(prompt):
                     task=prompt,
                 )
             except (requests.RequestException, ValueError, TypeError) as exc:
-                print(f"[D1 error] {exc}")
-                print("[Middleman] Failing closed: stopping generation.")
+                log(f"[D1 error] {exc}")
+                log("[Middleman] Failing closed: stopping generation.")
                 result["status"] = "error"
                 return result
 
-            print(f"[Signals] {state}")
+            log(f"[Signals] {state}")
             result["signals"] = state
             result["iteration_count"] = iteration
             result["text"] = window
@@ -107,18 +118,18 @@ def run_D1_streamer(prompt):
 
             # Deterministic control: D1 signals -> compiled TAC -> action.
             try:
-                action = VM.run(state)
+                action = vm.run(state)
             except (ValueError, TypeError, ZeroDivisionError) as exc:
-                print(f"[TAC error] {exc}")
-                print("[Middleman] Stopping because policy evaluation failed.")
+                log(f"[TAC error] {exc}")
+                log("[Middleman] Stopping because policy evaluation failed.")
                 result["status"] = "error"
                 return result
 
-            print(f"[TAC decision] {action}")
+            log(f"[TAC decision] {action}")
             result["action"] = action
 
             if action == "HALT":
-                print("[Middleman] Generation terminated by D1 policy.")
+                log("[Middleman] Generation terminated by D1 policy.")
                 result["status"] = "halt"
                 return result
 
@@ -126,7 +137,7 @@ def run_D1_streamer(prompt):
                 # Hand control back to the agent: report that the model could not
                 # complete the task as-is, and let it make a fresh call instead of
                 # stopping silently.
-                print(
+                log(
                     "[Middleman] Strategy change requested by D1 policy. "
                     "Returning control to the agent for a fresh call."
                 )
@@ -135,7 +146,7 @@ def run_D1_streamer(prompt):
 
             # A natural end from the 9B model also ends the run.
             if finish_reason == "stop":
-                print("[Middleman] 9B model finished naturally.")
+                log("[Middleman] 9B model finished naturally.")
                 result["status"] = "complete"
                 return result
 
@@ -150,11 +161,13 @@ def run_D1_streamer(prompt):
             })
 
         # Token budget exhausted: the 9B model ran out of tokens naturally.
-        print("\n[Middleman] Session ended.")
+        log("\n[Middleman] Session ended.")
         result["status"] = "complete"
         return result
 
     finally:
         # Record the terminal state on every exit path (halt/complete/error/
         # change_strategy/empty), so history always ends cleanly.
+        if result.get("status") == "running":
+            result["status"] = "error"
         rec.finish(result.get("status"), result.get("action"))

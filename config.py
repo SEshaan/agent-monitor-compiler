@@ -8,7 +8,7 @@ local workflow working out of the box.
 Environment variables
 ----------------------
 OPENAI_BASE_URL      chat endpoint for the 9B generator   (default: http://127.0.0.1:1234/v1)
-NINE_B_MODEL         model name sent to OPENAI_BASE_URL    (default: qwen/qwen3.5-0.8b)
+NINE_B_MODEL         model name sent to OPENAI_BASE_URL    (default: qwen3.5-0.8b)
 OPENAI_API_KEY       bearer token for the chat endpoint    (optional; "lm-studio" if unset)
 
 D1_BASE_URL          judge ("System One") endpoint         (default: http://127.0.0.1:1234/v1/systemone)
@@ -32,7 +32,7 @@ D1_TIMEOUT = int(os.environ.get("D1_TIMEOUT", "30"))
 
 # Generator (9B) — any OpenAI-compatible chat endpoint.
 OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://127.0.0.1:1234/v1")
-NINE_B_MODEL = os.environ.get("NINE_B_MODEL", "qwen/qwen3.5-0.8b")
+NINE_B_MODEL = os.environ.get("NINE_B_MODEL", "qwen3.5-0.8b")
 
 # Judge ("System One") — any OpenAI-compatible decisions endpoint.
 D1_BASE_URL = os.environ.get("D1_BASE_URL", "http://127.0.0.1:1234/v1/systemone")

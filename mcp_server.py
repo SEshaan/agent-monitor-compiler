@@ -16,6 +16,7 @@ loopback endpoints; it does not need to be remote.
 """
 
 import asyncio
+import sys
 
 from mcp.server import FastMCP
 
@@ -25,7 +26,7 @@ from .config import (
     NINE_B_MODEL,
     client,
 )
-from .policy_set import POLICIES, TAC
+from .policy_set import generate_policies
 from .tac_compiler import PolicyCompiler
 from .inference import run_D1_streamer
 from .session import SessionRecorder, DEFAULT_HISTORY_PATH
@@ -36,14 +37,44 @@ VALID_ACTIONS = {"HALT", "CONTINUE", "CHANGE_STRATEGY"}
 
 
 def _parse_policy_line(line):
-    """Split a policy line into (expression, action_or_None)."""
+    """Split a policy line into (expression, action), defaulting to CONTINUE."""
+    line = " ".join(line.split())
+    if not line or line.startswith("#"):
+        raise ValueError("Empty policy line")
+
+    # Accept either `expression ACTION` or `expression, ACTION`. A plain
+    # expression remains intact and uses the default CONTINUE action.
+    if "," in line:
+        expression, candidate = line.rsplit(",", 1)
+        candidate = candidate.strip().upper()
+        if candidate in VALID_ACTIONS:
+            if not expression.strip():
+                raise ValueError("Missing expression before action")
+            return expression.strip(), candidate
+
     parts = line.rsplit(None, 1)
-    expr_part = parts[0]
-    action = None
     if len(parts) == 2 and parts[1].upper() in VALID_ACTIONS:
-        expr_part = parts[0]
-        action = parts[1]
-    return expr_part, (action or "CONTINUE")
+        return parts[0], parts[1].upper()
+
+    # A conventional uppercase action-like suffix is almost certainly a
+    # misspelling, so report it instead of compiling it as an identifier.
+    if len(parts) == 2 and parts[1].isupper():
+        raise ValueError(
+            f"Invalid action {parts[1]!r}; expected one of "
+            f"{', '.join(sorted(VALID_ACTIONS))}"
+        )
+    return line, "CONTINUE"
+
+
+def _parse_policy_block(expressions):
+    """Parse non-empty policy lines into compiler-ready expression/action pairs."""
+    policies = []
+    for raw in expressions.splitlines():
+        line = " ".join(raw.split())
+        if not line or line.startswith("#"):
+            continue
+        policies.append(_parse_policy_line(line))
+    return policies
 
 
 @server.tool()
@@ -61,22 +92,26 @@ async def validate_policy(expressions: str) -> dict:
     README for details.
     """
     results = []
-    lines = [ln.strip() for ln in expressions.splitlines()]
+    lines = expressions.splitlines()
     for idx, raw in enumerate(lines):
-        if not raw or raw.startswith("#"):
+        if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         line = " ".join(raw.split())  # normalize whitespace
-        expr_part, action = _parse_policy_line(line)
         try:
+            expr_part, action = _parse_policy_line(line)
             PolicyCompiler().compile([(expr_part, action)])
             results.append({"line": idx + 1, "ok": True, "action": action})
         except Exception as exc:  # syntax / structure error
             results.append(
                 {"line": idx + 1, "ok": False, "error": str(exc)}
             )
+    if not results:
+        results.append(
+            {"line": None, "ok": False, "error": "No policy expressions provided"}
+        )
     return {
         "valid": all(r["ok"] for r in results),
-        "expressions_checked": len(results),
+        "expressions_checked": sum(r["line"] is not None for r in results),
         "results": results,
     }
 
@@ -86,7 +121,7 @@ async def run_generation(prompt: str, expressions: str | None = None) -> dict:
     """Stream the 9B generator gated by the D1 judge.
 
     If ``expressions`` is provided they are compiled and used for this run;
-    otherwise the default policy set (POLICIES) is used. Returns a structured
+    otherwise a task-specific policy set is generated. Returns a structured
     result describing how generation ended, e.g.:
 
         {"status": "complete", "action": None, "signals": {...}, ...}
@@ -96,11 +131,12 @@ async def run_generation(prompt: str, expressions: str | None = None) -> dict:
     A ``change_strategy`` result means the judge asked for a strategy change and
     control is handed back to you (the agent) to make a fresh call.
     """
-    if expressions:
+    if expressions and expressions.strip():
         try:
-            tac = PolicyCompiler().compile(
-                [ln.strip() for ln in expressions.splitlines() if ln.strip()]
-            )
+            policies = _parse_policy_block(expressions)
+            if not policies:
+                return {"status": "invalid_policy", "error": "No policy expressions provided", "prompt": prompt}
+            tac = PolicyCompiler().compile(policies)
         except Exception as exc:
             return {"status": "invalid_policy", "error": str(exc), "prompt": prompt}
     elif prompt:
@@ -110,10 +146,12 @@ async def run_generation(prompt: str, expressions: str | None = None) -> dict:
         except Exception as exc:
             return {"status": "invalid_policy", "error": str(exc), "prompt": prompt}
     else:
-        tac = TAC
+        tac = PolicyCompiler().compile(generate_policies(prompt))
 
     try:
-        result = await asyncio.to_thread(run_D1_streamer, prompt)
+        result = await asyncio.to_thread(
+            run_D1_streamer, prompt, tac, output_stream=sys.stderr
+        )
     except Exception as exc:  # network / model failure -> fail closed
         return {"status": "server_error", "error": str(exc), "prompt": prompt}
 
