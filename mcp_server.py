@@ -45,6 +45,7 @@ def _parse_policy_line(line):
     return expr_part, (action or "CONTINUE")
 
 
+@server.tool()
 async def validate_policy(expressions: str) -> dict:
     """Validate one or more policy expressions.
 
@@ -79,6 +80,7 @@ async def validate_policy(expressions: str) -> dict:
     }
 
 
+@server.tool()
 async def run_generation(prompt: str, expressions: str | None = None) -> dict:
     """Stream the 9B generator gated by the D1 judge.
 
