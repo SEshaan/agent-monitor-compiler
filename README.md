@@ -115,21 +115,25 @@ demo still defaults to the compiler-arithmetic phrasing when no task is given).
 
 ## MCP server
 
-`strmer/mcp_server.py` exposes strmer as two tools over the Model Context
+`strmer/mcp_server.py` exposes strmer as three tools over the Model Context
 Protocol. It runs locally on the same host that can reach `OPENAI_BASE_URL` /
 `D1_BASE_URL`; it does not need to be remote.
 
 ```bash
 pip install -r requirements.txt   # includes mcp[server]
 python -m strmer.mcp_server       # starts the MCP server (stdio/HTTP)
+# or connect from a client using the repo-root config:
+cat mcp.json                      # { "mcpServers": { "strmer": { command, args } } }
 ```
 
 | Tool | Purpose | Needs models? |
 |------|---------|---------------|
 | `validate_policy(expressions)` | Validate policy expressions for syntax and structure. Returns a per-line report; catches errors before they reach the VM. No network/models needed — safe to call standalone. | No |
-| `run_generation(prompt, expressions=None)` | Stream the 9B generator gated by the D1 judge. If `expressions` is given they're compiled for this run (validated first); otherwise the default policy set is used. Returns `{status, action, signals, iteration_count, text}`. A `change_strategy` status means control was handed back to you to make a fresh call. | Yes |
+| `run_generation(prompt, expressions=None)` | Stream the 9B generator gated by the D1 judge. If `expressions` is given they're compiled for this run (validated first); otherwise a **policy set tailored to your prompt** is synthesized on the fly (#2). Returns `{status, action, signals, iteration_count, text}`. A `change_strategy` status means control was handed back to you to make a fresh call. | Yes |
+| `get_history(limit=10)` | Return recent **structured execution history** (#4): the JSON event log (start/iteration/finish) written by each generation session, with judge signals on iteration events. No network/models needed — safe to call standalone. | No |
 
-Typical agent flow: `validate_policy(...)` → if valid, `run_generation(prompt, expressions=...)`.
+Typical agent flow: `validate_policy(...)` → if valid, `run_generation(prompt, expressions=...)`; then `get_history()` to review what happened.
+
 
 ### Semantic validation (follow-up)
 

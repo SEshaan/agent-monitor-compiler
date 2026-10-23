@@ -28,6 +28,7 @@ from .config import (
 from .policy_set import POLICIES, TAC
 from .tac_compiler import PolicyCompiler
 from .inference import run_D1_streamer
+from .session import SessionRecorder, DEFAULT_HISTORY_PATH
 
 server = FastMCP("strmer")
 
@@ -102,6 +103,12 @@ async def run_generation(prompt: str, expressions: str | None = None) -> dict:
             )
         except Exception as exc:
             return {"status": "invalid_policy", "error": str(exc), "prompt": prompt}
+    elif prompt:
+        # No explicit policies: synthesize a set tailored to this task (#2).
+        try:
+            tac = PolicyCompiler().compile(generate_policies(prompt))
+        except Exception as exc:
+            return {"status": "invalid_policy", "error": str(exc), "prompt": prompt}
     else:
         tac = TAC
 
@@ -118,6 +125,20 @@ async def run_generation(prompt: str, expressions: str | None = None) -> dict:
         "text": (result.get("text") or "")[:500],
     }
     return summary
+
+
+@server.tool()
+async def get_history(limit: int = 10) -> dict:
+    """Return recent structured execution history (#4).
+
+    Reads the JSON event log written by each generation session. Each entry has a
+    ``type`` of start/iteration/finish; iteration events carry the judge signals.
+    No models needed — safe to call standalone.
+    """
+    return {
+        "history_path": DEFAULT_HISTORY_PATH,
+        "events": SessionRecorder().get_history(limit=limit),
+    }
 
 
 if __name__ == "__main__":

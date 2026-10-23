@@ -37,7 +37,7 @@ NINE_B_MODEL = os.environ.get("NINE_B_MODEL", "qwen/qwen3.5-0.8b")
 # Judge ("System One") — any OpenAI-compatible decisions endpoint.
 D1_BASE_URL = os.environ.get("D1_BASE_URL", "http://127.0.0.1:1234/v1/systemone")
 D1_ENDPOINT = D1_BASE_URL
-D1_MODEL = os.environ.get("D1_MODEL", "d1-3b")
+D1_MODEL = os.environ.get("D1_MODEL", "d1-omni-600m")
 D1_API_KEY = os.environ.get("D1_API_KEY", "")  # optional; sent as a Bearer token
 
 # The OpenAI client is only for the 9B generator. JEV/D1 are called with plain
