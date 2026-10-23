@@ -23,6 +23,12 @@ PROGRESS_LEVELS = [
     "Task fully addressed",
 ]
 
+# Fallback task description used when the caller does not supply one. Kept as a
+# module constant so the default behavior (and any existing callers) is stable.
+DEFAULT_TASK = (
+    "explaining how a compiler translates arithmetic expressions"
+)
+
 
 def get_answer(result, name, expected_type):
     """Return one answer from a System One response, or raise ValueError."""
@@ -52,7 +58,46 @@ def rescale(score, levels):
     return max(0.0, min(1.0, float(score) / top))
 
 
-def analyze_with_D1(text, previous_text, iteration):
+def _build_questions(task):
+    """Build the judge rubric for a given task.
+
+    When ``task`` is None, fall back to DEFAULT_TASK so existing callers and the
+    local demo keep their original behavior. This lets any caller (e.g. an MCP
+    agent) pass its own goal so progress/task-complete are scored against it.
+    """
+    task = task or DEFAULT_TASK
+    return {
+        "loop_score": {
+            "type": "score",
+            "instructions": (
+                "How repetitive is recent_output compared with "
+                "previous_output, without adding anything new?"
+            ),
+            "criteria": LOOP_LEVELS,
+        },
+        "progress_score": {
+            "type": "score",
+            "instructions": (
+                f"How much meaningful progress does recent_output make toward "
+                f"{task}?"
+            ),
+            "criteria": PROGRESS_LEVELS,
+        },
+        # "noul" answers with the probability (0-1) that the reply is yes.
+        "task_complete": {
+            "type": "noul",
+            "instructions": (
+                f"Is {task} fully complete, so that no more output is needed?"
+            ),
+            "criteria": {
+                "true": "The task is fully complete; no more output is needed",
+                "false": "More work is required to finish the task",
+            },
+        },
+    }
+
+
+def analyze_with_D1(text, previous_text, iteration, task=None):
     payload = {
         "model": D1_MODEL,
         "state": {
@@ -60,37 +105,7 @@ def analyze_with_D1(text, previous_text, iteration):
             "previous_output": previous_text or "(none; this is the first segment)",
             "iteration": iteration,
         },
-        "questions": {
-            "loop_score": {
-                "type": "score",
-                "instructions": (
-                    "How repetitive is recent_output compared with "
-                    "previous_output, without adding anything new?"
-                ),
-                "criteria": LOOP_LEVELS,
-            },
-            "progress_score": {
-                "type": "score",
-                "instructions": (
-                    "How much meaningful progress does recent_output make "
-                    "toward explaining how a compiler translates "
-                    "arithmetic expressions?"
-                ),
-                "criteria": PROGRESS_LEVELS,
-            },
-            # "noul" answers with the probability (0-1) that the reply is yes.
-            "task_complete": {
-                "type": "noul",
-                "instructions": (
-                    "Is the requested task fully complete, so that no more "
-                    "output is needed?"
-                ),
-                "criteria": {
-                    "true": "The task is fully complete; no more output is needed",
-                    "false": "More work is required to finish the task",
-                },
-            },
-        },
+        "questions": _build_questions(task),
     }
 
     headers = {"Content-Type": "application/json"}

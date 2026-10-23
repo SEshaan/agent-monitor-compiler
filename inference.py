@@ -79,10 +79,13 @@ def run_D1_streamer(prompt):
         print(f"\n\n[Middleman] Analysis checkpoint #{iteration}")
 
         try:
+            # Thread the original task/prompt to the judge so progress and
+            # task-complete are scored against this request, not a hardcoded one.
             state = analyze_with_D1(
                 window,
                 previous_window,
                 iteration,
+                task=prompt,
             )
         except (requests.RequestException, ValueError, TypeError) as exc:
             print(f"[D1 error] {exc}")

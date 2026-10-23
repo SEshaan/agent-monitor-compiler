@@ -105,3 +105,34 @@ Optional environment variables:
 
 Every stage fails closed: a judge error, a policy-evaluation error, or an
 unexpected signal stops generation rather than letting it continue unchecked.
+
+## Task-aware judge (#1)
+
+The judge now scores against **your actual task**, not a hardcoded one. The
+original prompt is threaded from `run_D1_streamer` into `analyze_with_D1(task=...)`,
+so `progress_score` and `task_complete` are meaningful for any request (the local
+demo still defaults to the compiler-arithmetic phrasing when no task is given).
+
+## MCP server
+
+`strmer/mcp_server.py` exposes strmer as two tools over the Model Context
+Protocol. It runs locally on the same host that can reach `OPENAI_BASE_URL` /
+`D1_BASE_URL`; it does not need to be remote.
+
+```bash
+pip install -r requirements.txt   # includes mcp[server]
+python -m strmer.mcp_server       # starts the MCP server (stdio/HTTP)
+```
+
+| Tool | Purpose | Needs models? |
+|------|---------|---------------|
+| `validate_policy(expressions)` | Validate policy expressions for syntax and structure. Returns a per-line report; catches errors before they reach the VM. No network/models needed — safe to call standalone. | No |
+| `run_generation(prompt, expressions=None)` | Stream the 9B generator gated by the D1 judge. If `expressions` is given they're compiled for this run (validated first); otherwise the default policy set is used. Returns `{status, action, signals, iteration_count, text}`. A `change_strategy` status means control was handed back to you to make a fresh call. | Yes |
+
+Typical agent flow: `validate_policy(...)` → if valid, `run_generation(prompt, expressions=...)`.
+
+### Semantic validation (follow-up)
+
+`validate_policy` currently checks **syntax and structure**. Semantic
+validation — rejecting references to undefined signals like `bogus_signal` at
+compile time — is a planned enhancement to `PolicyCompiler`; see the changelog.
